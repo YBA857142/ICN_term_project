@@ -19,8 +19,14 @@ def log(port, address, code, message, path=""):
 
 def handle_client(client_socket, client_address, port):
     try:
-        request = client_socket.recv(1024).decode()
+        request = client_socket.recv(4096).decode()
         print(f"[{port}] Received request:\n{request}")
+
+        if request == "":
+            request = "/ /"
+        
+        filename = request.split()[1].lstrip("/")
+        print(f"[{port}] Extracted filename: {filename}")
 
         # Simple response for GET requests
         if request.startswith("GET /index.html"):
