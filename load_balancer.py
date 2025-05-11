@@ -24,6 +24,30 @@ def handle_request(client_socket, backend_servers, next_server_index):
         print(f"[RR] Received request: {method} {path}")
         print(f"[RR] Extracted filename: {filename}")
 
+        # Check for sticky backend cookie
+        cookie_header = [header for header in request_data.decode(errors='ignore').split('\r\n') if header.startswith("Cookie:")]
+        if cookie_header:
+            cookie_value = cookie_header[0].split("sticky_backend=")[-1].split(";")[0]
+            backend_host, backend_port = cookie_value.split(":")
+            backend_port = int(backend_port)
+            print(f"[RR] Sticky backend found: {backend_host}:{backend_port}")
+            backend_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            backend_socket.settimeout(5)  # Set a timeout for the backend connection
+
+            backend_socket.connect((backend_host, backend_port))
+            backend_socket.sendall(request_data)
+
+            response_data = b""
+            while True:
+                chunk = backend_socket.recv(4096)
+                if not chunk:
+                    break
+                response_data += chunk
+
+            client_socket.sendall(response_data)
+            return
+
+
         with cache_lock:
             try:
                 with open(os.path.join(cache_dir, filename), "r") as cache_file:
@@ -66,7 +90,11 @@ def handle_request(client_socket, backend_servers, next_server_index):
                         cache_file.write(response_body)
                     print(f"[CACHE]  {'stored':<6} {filename}")
 
-            client_socket.sendall(response_data)
+                    client_socket.sendall(b"HTTP/1.1 200 OK\r\n")
+                    client_socket.sendall(b"Set-Cookie: sticky_backend=" + backend_host.encode() + b":" + str(backend_port).encode() + b"; Path=/\r\n\r\n")
+                    client_socket.sendall(response_body)
+                else:
+                    client_socket.sendall(response_data)
         
     except ConnectionRefusedError as e:
         print(f"[RR]     → {backend_host}:{backend_port}  /{filename}  [ERROR] {e}")

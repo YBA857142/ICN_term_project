@@ -29,7 +29,7 @@ while True:
     # TODO Start
     connectionSocket, address = serverSocket.accept()
     # used for demo 504 error
-    time.sleep(5000)
+    # time.sleep(5000)
     # TODO End
     print(str(address) + " connected")
 
