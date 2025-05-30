@@ -1,126 +1,142 @@
-import socket
-import threading
-import os
-
-# Configuration
+#!/usr/bin/env python3
+import socket, threading, os, itertools, time
+from http.cookies import SimpleCookie
+ 
+# ── 0. Configuration ──────────────────────────────────────────────────────────
 BACKEND_SERVERS = [("localhost", 8001), ("localhost", 8002)]
-LISTEN_PORT = 8888
-
-cache_dir = os.path.join(os.getcwd(), "cache")
-if not os.path.exists(cache_dir):
-    os.makedirs(cache_dir) 
-cache_lock = threading.Lock()
-
-def handle_request(client_socket, backend_servers, next_server_index):
+LISTEN_PORT     = 8888
+CACHE_DIR       = os.path.join(os.getcwd(), "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+ 
+ROUND_ROBIN     = itertools.cycle(BACKEND_SERVERS)   # thread-safe iterator
+rr_lock         = threading.Lock()                   # only for cookie fallback
+CACHE_LOCK      = threading.Lock()
+ 
+TIMEOUT         = 5          # seconds for backend connect / recv
+ 
+# ── 1. Helpers ────────────────────────────────────────────────────────────────
+def choose_backend_from_cookie(cookie_header: str):
+    c = SimpleCookie()
+    c.load(cookie_header)
+    if "sticky_backend" not in c:                       # no cookie
+        return None
+    host, _, port = c["sticky_backend"].value.partition(":")
     try:
-        request_data = client_socket.recv(4096)
-        if not request_data:
+        port = int(port)
+    except ValueError:
+        return None
+    candidate = (host, port)
+    # quick reachability test
+    try:
+        with socket.create_connection(candidate, timeout=1):
+            return candidate
+    except OSError:
+        return None
+ 
+def round_robin_backend():
+    # itertools.cycle is thread-safe for next(); extra lock not strictly needed
+    return next(ROUND_ROBIN)
+ 
+def build_http_error(code, phrase):
+    body  = f"<html><body><h1>{code} {phrase}</h1></body></html>".encode()
+    hdr   = (f"HTTP/1.1 {code} {phrase}\r\n"
+             f"Content-Length: {len(body)}\r\n"
+             f"Content-Type: text/html; charset=UTF-8\r\n"
+             "Connection: close\r\n\r\n").encode()
+    return hdr + body
+ 
+# ── 2. Worker ────────────────────────────────────────────────────────────────
+def handle(client, client_address):
+    try:
+        request = client.recv(65536)                    # one RTT assumption
+        if not request:
             return
-
-        request_line = request_data.decode(errors='ignore').split('\r\n')[0]
-        method, path, *_ = request_line.split()
-        filename = path.strip("/")
-
-        print(f"[RR] Received request: {method} {path}")
-        print(f"[RR] Extracted filename: {filename}")
-
-        # Check for sticky backend cookie
-        cookie_header = [header for header in request_data.decode(errors='ignore').split('\r\n') if header.startswith("Cookie:")]
-        if cookie_header:
-            cookie_value = cookie_header[0].split("sticky_backend=")[-1].split(";")[0]
-            backend_host, backend_port = cookie_value.split(":")
-            backend_port = int(backend_port)
-            print(f"[RR] Sticky backend found: {backend_host}:{backend_port}")
-            backend_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            backend_socket.settimeout(5)  # Set a timeout for the backend connection
-
-            backend_socket.connect((backend_host, backend_port))
-            backend_socket.sendall(request_data)
-
-            response_data = b""
-            while True:
-                chunk = backend_socket.recv(4096)
-                if not chunk:
-                    break
-                response_data += chunk
-
-            client_socket.sendall(response_data)
-            return
-
-
-        with cache_lock:
-            try:
-                with open(os.path.join(cache_dir, filename), "r") as cache_file:
-                    output_data = cache_file.readlines()
-                file_exist = "true"
-                
-                print(f"[CACHE]  {'hit':<6} {filename}")
-                client_socket.send(b"HTTP/1.1 200 OK\r\n\r\n")
-                for line in output_data:
-                    client_socket.sendall(line.encode("utf-8"))
-                
-            except FileNotFoundError:
-                file_exist = "false"
-                print(f"[CACHE]  {'miss':<6} {filename}")
-
-        if file_exist == "false":     
-                
-            backend_host, backend_port = backend_servers[next_server_index[0] % len(backend_servers)]
-            next_server_index[0] += 1
-            print(f"[RR]     → {backend_host}:{backend_port}  /{filename}")
-
-            backend_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            backend_socket.settimeout(5)  # Set a timeout for the backend connection
-
-            backend_socket.connect((backend_host, backend_port))
-            backend_socket.sendall(request_data)
-
-            response_data = b""
-            while True:
-                chunk = backend_socket.recv(4096)
-                if not chunk:
-                    break
-                response_data += chunk
-
-            with cache_lock:
-                response_lines = response_data.decode(errors='ignore').splitlines()
-                if response_lines[0].startswith("HTTP/1.1 200 OK"):
-                    response_body = "\r\n".join(response_lines[1:]).encode("utf-8")
-                    with open(os.path.join(cache_dir, filename), "wb") as cache_file:
-                        cache_file.write(response_body)
-                    print(f"[CACHE]  {'stored':<6} {filename}")
-
-                    client_socket.sendall(b"HTTP/1.1 200 OK\r\n")
-                    client_socket.sendall(b"Set-Cookie: sticky_backend=" + backend_host.encode() + b":" + str(backend_port).encode() + b"; Path=/\r\n\r\n")
-                    client_socket.sendall(response_body)
-                else:
-                    client_socket.sendall(response_data)
+ 
+        header_block = request.split(b"\r\n\r\n", 1)[0]
+        headers      = header_block.decode(errors="ignore").split("\r\n")
+        req_line     = headers[0]
+        method, path, _ = req_line.split()
+        print(f"[INFO] {method} {path} from {client_address[0]}:{client_address[1]}")
         
-    except ConnectionRefusedError as e:
-        print(f"[RR]     → {backend_host}:{backend_port}  /{filename}  [ERROR] {e}")
-        client_socket.sendall(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")
-        client_socket.sendall(b"<html><body><h1>502 Bad Gateway</h1></body></html>")
-    except TimeoutError as e:
-        print(f"[RR]     → {backend_host}:{backend_port}  /{filename}  [ERROR] {e}")
-        client_socket.sendall(b"HTTP/1.1 504 Gateway Timeout\r\n\r\n")
-        client_socket.sendall(b"<html><body><h1>504 Gateway Timeout</h1></body></html>")
+        # normalise path for cache key
+        clean_path = path.split("?", 1)[0].lstrip("/") or "index.html"
+        cache_file = os.path.join(CACHE_DIR, clean_path + ".cache")
+ 
+        # ── 2.1 Cache lookup ────────────────────────────────────────────────
+        with CACHE_LOCK:
+            if os.path.isfile(cache_file):
+                print(f"[CACHE] hit  {clean_path}")
+                with open(cache_file, "rb") as f:
+                    client.sendall(f.read())
+                return
+            else:
+                print(f"[CACHE] miss {clean_path}")
+ 
+        # ── 2.2 Sticky-session cookie check ─────────────────────────────────
+        cookie_line = next((h for h in headers if h.lower().startswith("cookie:")), "")
+        cookie_value = cookie_line.partition(":")[2].strip()
+        print(f"[DEBUG] Cookie value: {cookie_value}")
+        backend = choose_backend_from_cookie(cookie_value)
+ 
+        used_rr   = False
+        if backend is None:
+            backend  = round_robin_backend()
+            used_rr  = True
+ 
+        host, port = backend
+        if not used_rr:
+            print(f"[STICKY] Using backend from cookie: {host}:{port}")
+        else:
+            print(f"[RR]  → {host}:{port} /{clean_path}")
+ 
+        # ── 2.3 Forward to backend ─────────────────────────────────────────
+        with socket.create_connection(backend, timeout=TIMEOUT) as bsock:
+            bsock.sendall(request)
+            response = b""
+            while True:
+                chunk = bsock.recv(65536)
+                if not chunk: break
+                response += chunk
+ 
+        # ── 2.4 Cache store if 200 OK ──────────────────────────────────────
+        if response.startswith(b"HTTP/1.1 200"):
+            with CACHE_LOCK:
+                os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+                with open(cache_file, "wb") as f:
+                    f.write(response)
+                print(f"[CACHE] stored {clean_path}")
+ 
+        # ── 2.5 Inject Set-Cookie header if backend chosen by RR ───────────
+        if used_rr:
+            head, body = response.split(b"\r\n\r\n", 1)
+            response   = b"\r\n".join([
+                          head,
+                          f"Set-Cookie: sticky_backend={host}:{port}; Path=/".encode(),
+                          b"", body])
+ 
+        client.sendall(response)
+ 
+    except ConnectionRefusedError:
+        client.sendall(build_http_error(502, "Bad Gateway"))
+    except socket.timeout:
+        client.sendall(build_http_error(504, "Gateway Timeout"))
+    except Exception as e:
+        print("[ERROR]", e)
+        client.sendall(build_http_error(500, "Internal Server Error"))
     finally:
-        client_socket.close()
-
+        client.close()
+ 
+# ── 3. Main ─────────────────────────────────────────────────────────────────
 def main():
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.bind(("localhost", LISTEN_PORT))
-    server_socket.listen(5)
-
-    print(f"[+] Load Balancer listening on :{LISTEN_PORT}")
-
-    next_server_index = [0]
-
-    while True:
-        client_socket, client_address = server_socket.accept()
-        print(f"[+] Accepted connection from {client_address}")
-        thread = threading.Thread(target=handle_request, args=(client_socket, BACKEND_SERVERS, next_server_index))
-        thread.start()
-
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("", LISTEN_PORT))
+        s.listen()
+        print(f"[+] Load balancer listening on :{LISTEN_PORT}")
+ 
+        while True:
+            c, addr = s.accept()
+            threading.Thread(target=handle, args=(c, addr), daemon=True).start()
+ 
 if __name__ == "__main__":
     main()
