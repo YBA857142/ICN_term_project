@@ -35,21 +35,12 @@ while True:
     try:
         # Receive and decode the client's request
         # TODO Start
-        message = ""
-        while True:
-            chunk = connectionSocket.recv(65536)
-            if not chunk:
-                break
-            message += chunk.decode("utf-8")
-            if b"\r\n\r\n" in chunk:
-                break
-        # message = connectionSocket.recv(65536).decode("utf-8")
+        message = connectionSocket.recv(65536).decode("utf-8")
         # TODO End
 
         # If the message is empty, set it to a default value
         if message == "":
-            message = "GET /junk.html HTTP/1.1"
-        # message += "/ /"
+            message == "/ /"
 
         # Print the client's request message
         print(f"client's request message: \n {message}")
@@ -65,7 +56,6 @@ while True:
         print(f"directory: {os.getcwd()}")
         f = open(os.getcwd()+"/PA/"+filename)
         outputdata = f.readlines()
-        # outputdata = "test"
 
         # 1. Send an HTTP response header to the client
         # 2. Send the content of the requested file to the client line by line
@@ -77,13 +67,17 @@ while True:
         sys.stdout.flush()
         # TODO End
     # except IOError:
-    except Exception as e:
-        print(f"[ERROR in server] {e}")
+    except IOError as e:
+        print(f"[File not found] {e}")
         # If the requested file is not found, send a 404 Not Found response
         # TODO Start
-        connectionSocket.send(b"HTTP/1.1 404 Not Found\r\n"+ \
-                              b"<html><head></head><body><h1>404 Not Found</h1></body></html>\r\n\r\n")
+        connectionSocket.send(b"HTTP/1.1 404 Not Found\r\n\r\n"+ \
+                              b"<html><head></head><body><h1>404 Not Found</h1></body></html>")
         pass
         # TODO End
+    except Exception as e:
+        print(f"[ERROR in server] {e}")
+        connectionSocket.send(b"HTTP/1.1 500 Internal Server Error\r\n\r\n"+ \
+                              b"<html><head></head><body><h1>500 Internal Server Error</h1></body></html>")
     finally:
         connectionSocket.close()

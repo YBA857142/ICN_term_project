@@ -52,6 +52,7 @@ def handle(client, client_address):
         if not request:
             return
         print("=================================")
+        print(f"[REQUEST] {request}")
         header_block = request.split(b"\r\n\r\n", 1)[0]
         headers      = header_block.decode(errors="ignore").split("\r\n")
         req_line     = headers[0]
@@ -67,7 +68,9 @@ def handle(client, client_address):
             if os.path.isfile(cache_file):
                 print(f"[CACHE] hit  {clean_path}")
                 with open(cache_file, "rb") as f:
-                    client.sendall(f.read())
+                    temp = f.read()
+                    client.sendall(temp)
+                    print(f"[Response] {temp}")
                 return
             else:
                 print(f"[CACHE] miss {clean_path}")
@@ -90,12 +93,7 @@ def handle(client, client_address):
             print(f"[RR]  → {host}:{port} /{clean_path}")
  
         # ── 2.3 Forward to backend ─────────────────────────────────────────
-        with socket.create_connection(backend) as bsock:
-            temp = request
-            # print(f"REQUEST: {temp}")
-            f_temp = open(f"r{port}","w")
-            f_temp.write(temp.decode("utf-8"))
-            f_temp.flush()
+        with socket.create_connection(backend, timeout = TIMEOUT) as bsock:
             bsock.sendall(request)
             response = b""
             while True:
@@ -119,6 +117,7 @@ def handle(client, client_address):
                           head,
                           f"Set-Cookie: sticky_backend={host}:{port}; Path=/".encode(),
                           b"", body])
+        print(f"[Response] {response}")
  
         client.sendall(response)
  
