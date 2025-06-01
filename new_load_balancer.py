@@ -90,20 +90,15 @@ def handle(client, client_address):
             print(f"[RR]  → {host}:{port} /{clean_path}")
  
         # ── 2.3 Forward to backend ─────────────────────────────────────────
-        with socket.create_connection(backend) as bsock:
-            temp = request
-            # print(f"REQUEST: {temp}")
-            f_temp = open(f"r{port}","w")
-            f_temp.write(temp.decode("utf-8"))
-            f_temp.flush()
+        with socket.create_connection(backend, timeout=TIMEOUT) as bsock:
+            print(f"REQUEST: {request}")
             bsock.sendall(request)
             response = b""
             while True:
                 chunk = bsock.recv(65536)
                 if not chunk: break
                 response += chunk
-            bsock.close()
-            
+ 
         # ── 2.4 Cache store if 200 OK ──────────────────────────────────────
         if response.startswith(b"HTTP/1.1 200"):
             with CACHE_LOCK:
@@ -134,15 +129,17 @@ def handle(client, client_address):
  
 # ── 3. Main ─────────────────────────────────────────────────────────────────
 def main():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        s.bind(("", LISTEN_PORT))
-        s.listen()
-        print(f"[+] Load balancer listening on :{LISTEN_PORT}")
- 
-        while True:
-            c, addr = s.accept()
-            threading.Thread(target=handle, args=(c, addr), daemon=True).start()
+    # with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind(("", LISTEN_PORT))
+    s.listen()
+    print(f"[+] Load balancer listening on :{LISTEN_PORT}")
+
+    while True:
+        c, addr = s.accept()
+        handle(c, addr)
+        threading.Thread(target=handle, args=(c, addr), daemon=True).start()
  
 if __name__ == "__main__":
     main()

@@ -1,5 +1,5 @@
 import socket
-import sys
+import sys, os
 import time
 
 # Server setup
@@ -23,6 +23,7 @@ serverSocket.listen(0)
 
 # Start an infinite loop to handle incoming client requests
 while True:
+    print("=================================")
     print('Ready to serve...')
 
     # Accept an incoming connection and get the client's address
@@ -34,28 +35,41 @@ while True:
     print(str(address) + " connected")
 
     try:
+        
         # Receive and decode the client's request
         # TODO Start
-        message = connectionSocket.recv(1000).decode("utf-8")
+        message = ""
+        while True:
+            chunk = connectionSocket.recv(65536)
+            if not chunk:
+                break
+            message += chunk.decode("utf-8")
+            if b"\r\n\r\n" in chunk:
+                break
+        # message = connectionSocket.recv(65536).decode("utf-8")
         # TODO End
 
         # If the message is empty, set it to a default value
         if message == "":
-            message = "/ /"
+            message = "GET /junk.html HTTP/1.1"
+        # message += "/ /"
 
         # Print the client's request message
         print(f"client's request message: \n {message}")
 
         # Extract the filename from the client's request
         # TODO Start
-        filename = message.split()[1].lstrip("/")
+        filename = message.split(' ')[1].lstrip("/")
         # TODO End
         print(f"Extract the filename: {filename}")
 
         # Open the requested file
         # Read the file's content and store it in a list of lines
-        f = open(filename)
+        print(f"directory: {os.getcwd()}")
+        f = open(os.getcwd()+"/PA/"+filename)
+        print("file opened")
         outputdata = f.readlines()
+        # outputdata = "test"
 
         # 1. Send an HTTP response header to the client
         # 2. Send the content of the requested file to the client line by line
@@ -64,14 +78,16 @@ while True:
         connectionSocket.send(b"HTTP/1.1 200 OK\r\n\r\n")
         for line in outputdata:
             connectionSocket.send(line.encode("utf-8"))
-        connectionSocket.close()
+        sys.stdout.flush()
         # TODO End
-
-    except IOError:
+    # except IOError:
+    except Exception as e:
+        print(f"[ERROR in server] {e}")
         # If the requested file is not found, send a 404 Not Found response
         # TODO Start
-        connectionSocket.send(b"HTTP/1.1 404 Not Found\r\n\r\n")
-        connectionSocket.send(b"<html><head></head><body><h1>404 Not Found</h1></body></html>\r\n")
-        connectionSocket.close()
+        connectionSocket.send(b"HTTP/1.1 404 Not Found\r\n"+ \
+                              b"<html><head></head><body><h1>404 Not Found</h1></body></html>\r\n\r\n")
         pass
         # TODO End
+    finally:
+        connectionSocket.close()

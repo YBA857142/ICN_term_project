@@ -1,0 +1,9 @@
+http://localhost:8888/index.html
+http://localhost:8888/helloworld.html
+http://127.0.0.1:8888/index.html
+http://127.0.0.1:8888/helloworld.html
+
+2. cache X cookie X -> cache O cookie O (127.0.0.1)
+3. cache X cookie O -> cache O cookie O
+4. cache O cookie X -> cache O cookie X
+5. cache X cookie X -> cache O cookie O (localhost)
