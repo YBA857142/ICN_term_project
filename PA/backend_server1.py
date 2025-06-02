@@ -58,7 +58,6 @@ while True:
         # Read the file's content and store it in a list of lines
         print(f"directory: {os.getcwd()}")
         f = open(os.getcwd()+"/PA/"+filename)
-        print("file opened")
         outputdata = f.readlines()
 
         # 1. Send an HTTP response header to the client
@@ -78,7 +77,6 @@ while True:
         # TODO Start
         connectionSocket.send(b"HTTP/1.1 404 Not Found\r\n\r\n"+ \
                               b"<html><head></head><body><h1>404 Not Found</h1></body></html>")
-        pass
         # TODO End
     except Exception as e:
         print(f"[ERROR in server] {e}")

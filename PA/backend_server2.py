@@ -12,7 +12,6 @@ HOST, PORT = "127.0.0.1", 8002
 # 2. Bind the socket to the address
 # TODO Start
 serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-serverSocket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 serverSocket.bind((HOST, PORT))
 # TODO End
 
@@ -67,13 +66,13 @@ while True:
         sys.stdout.flush()
         # TODO End
     # except IOError:
+
     except IOError as e:
         print(f"[File not found] {e}")
         # If the requested file is not found, send a 404 Not Found response
         # TODO Start
         connectionSocket.send(b"HTTP/1.1 404 Not Found\r\n\r\n"+ \
                               b"<html><head></head><body><h1>404 Not Found</h1></body></html>")
-        pass
         # TODO End
     except Exception as e:
         print(f"[ERROR in server] {e}")

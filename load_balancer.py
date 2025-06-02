@@ -48,6 +48,7 @@ def build_http_error(code, phrase):
 # ── 2. Worker ────────────────────────────────────────────────────────────────
 def handle(client, client_address):
     try:
+        # ── 2.0 HTTP request parsing ────────────────────────────────────────
         request = client.recv(65536)                    # one RTT assumption
         if not request:
             return
@@ -76,7 +77,7 @@ def handle(client, client_address):
                 print(f"[CACHE] miss {clean_path}")
  
         # ── 2.2 Sticky-session cookie check ─────────────────────────────────
-        cookie_line = next((h for h in headers if h.lower().startswith("cookie:")), "")
+        cookie_line = next((h for h in headers if h.startswith("Cookie:")), "")
         cookie_value = cookie_line.partition(":")[2].strip()
         print(f"[DEBUG] Cookie value: {cookie_value}")
         backend = choose_backend_from_cookie(cookie_value)
@@ -117,8 +118,8 @@ def handle(client, client_address):
                           head,
                           f"Set-Cookie: sticky_backend={host}:{port}; Path=/".encode(),
                           b"", body])
+            
         print(f"[Response] {response}")
- 
         client.sendall(response)
  
     except ConnectionRefusedError:
